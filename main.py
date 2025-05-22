@@ -43,348 +43,234 @@ def connect_db():
     )
 
 
-# === ФУНКЦИИ ДЛЯ СОТРУДНИКОВ ===
+# === СОЗДАНИЕ ПРОИЗВОЛЬНОЙ ТАБЛИЦЫ С ОГРАНИЧЕНИЯМИ И ВНЕШНИМИ КЛЮЧАМИ ===
 
-# Загрузка сотрудников
-def get_employees():
-    db = connect_db()
-    cursor = db.cursor(dictionary=True)
-    cursor.execute("""
-        SELECT e.id, e.full_name, e.mail, e.pass, b.name AS organization 
-        FROM employees e
-        JOIN branch b ON e.organization_id = b.id
-    """)
-    employees = cursor.fetchall()
-    db.close()
-    return employees
-
-
-# Обновление таблицы сотрудников
-def refresh_employee_table(tree):
-    for item in tree.get_children():
-        tree.delete(item)
-
-    employees = get_employees()
-    for emp in employees:
-        tree.insert("", tk.END, values=(emp['id'], emp['full_name'], emp['mail'], emp['pass'], emp['organization']))
-
-
-# Окно просмотра сотрудников
-def show_employees_window():
-    win = tk.Toplevel()
-    win.title("Сотрудники")
-
-    # Таблица
-    tree = ttk.Treeview(win, columns=("ID", "Ф.И.О.", "Email", "Пароль", "Организация"), show="headings")
-    tree.heading("ID", text="ID")
-    tree.heading("Ф.И.О.", text="Ф.И.О.")
-    tree.heading("Email", text="Email")
-    tree.heading("Пароль", text="Пароль")
-    tree.heading("Организация", text="Организация")
-
-    tree.column("ID", width=50)
-    tree.column("Ф.И.О.", width=150)
-    tree.column("Email", width=150)
-    tree.column("Пароль", width=100)
-    tree.column("Организация", width=150)
-
-    employees = get_employees()
-    for emp in employees:
-        tree.insert("", tk.END, values=(emp['id'], emp['full_name'], emp['mail'], emp['pass'], emp['organization']))
-
-    tree.pack(padx=10, pady=10)
-
-    # Кнопки
-    btn_frame = tk.Frame(win)
-    btn_frame.pack(pady=10)
-
-    tk.Button(btn_frame, text="Обновить", command=lambda: refresh_employee_table(tree)).grid(row=0, column=0, padx=5)
-    tk.Button(btn_frame, text="Добавить", command=lambda: add_employee_window(tree)).grid(row=0, column=1, padx=5)
-    tk.Button(btn_frame, text="Редактировать", command=lambda: edit_employee(tree)).grid(row=0, column=2, padx=5)
-    tk.Button(btn_frame, text="Удалить", command=lambda: delete_employee(tree)).grid(row=0, column=3, padx=5)
-
-
-# Окно добавления сотрудника
-def add_employee_window(tree):
-    win = tk.Toplevel()
-    win.title("Добавить сотрудника")
-
-    orgs = load_organizations()
-
-    tk.Label(win, text="Ф.И.О.:").grid(row=0, column=0, padx=10, pady=5)
-    entry_fio = tk.Entry(win, width=30)
-    entry_fio.grid(row=0, column=1, padx=10, pady=5)
-
-    tk.Label(win, text="Email:").grid(row=1, column=0, padx=10, pady=5)
-    entry_mail = tk.Entry(win, width=30)
-    entry_mail.grid(row=1, column=1, padx=10, pady=5)
-
-    tk.Label(win, text="Пароль:").grid(row=2, column=0, padx=10, pady=5)
-    entry_pass = tk.Entry(win, show="*", width=30)
-    entry_pass.grid(row=2, column=1, padx=10, pady=5)
-
-    tk.Label(win, text="Организация:").grid(row=3, column=0, padx=10, pady=5)
-    selected_org = tk.StringVar()
-    combo_box = ttk.Combobox(win, textvariable=selected_org, values=[f"{org['id']} - {org['name']}" for org in orgs], state="readonly", width=27)
-    combo_box.current(0 if orgs else None)
-    combo_box.grid(row=3, column=1, padx=10, pady=5)
-
-    def save_employee():
-        full_name = entry_fio.get().strip()
-        mail = entry_mail.get().strip()
-        password = entry_pass.get().strip()
-        organization_id = combo_box.get().split(" - ")[0]
-
-        if not full_name:
-            messagebox.showwarning("Ошибка", "Ф.И.О. не может быть пустым!")
-            return
-
-        db = connect_db()
-        cursor = db.cursor()
-        sql = """
-            INSERT INTO employees (full_name, mail, pass, organization_id) VALUES (%s, %s, %s, %s)
-        """
-        cursor.execute(sql, (full_name, mail, password, int(organization_id)))
-        db.commit()
-        db.close()
-
-        messagebox.showinfo("Успех", "Сотрудник добавлен!")
-        refresh_employee_table(tree)
-        win.destroy()
-
-    tk.Button(win, text="Сохранить", command=save_employee).grid(row=4, column=0, columnspan=2, pady=10)
-
-
-# Редактирование сотрудника
-def edit_employee(tree):
-    selected_item = tree.selection()
-    if not selected_item:
-        messagebox.showwarning("Ошибка", "Выберите сотрудника для редактирования!")
-        return
-
-    item_data = tree.item(selected_item)
-    employee_id = item_data['values'][0]
-    full_name = item_data['values'][1]
-    mail = item_data['values'][2]
-    password = item_data['values'][3]
-    organization = item_data['values'][4]
-
-    orgs = load_organizations()
-    try:
-        org_index = next(i for i, o in enumerate(orgs) if o['name'] == organization)
-    except StopIteration:
-        messagebox.showerror("Ошибка", "Не найдена организация")
-        return
-
-    edit_win = tk.Toplevel()
-    edit_win.title("Редактировать сотрудника")
-
-    tk.Label(edit_win, text="Ф.И.О.:").grid(row=0, column=0, padx=10, pady=5)
-    entry_fio = tk.Entry(edit_win, width=30)
-    entry_fio.insert(0, full_name)
-    entry_fio.grid(row=0, column=1)
-
-    tk.Label(edit_win, text="Email:").grid(row=1, column=0, padx=10, pady=5)
-    entry_mail = tk.Entry(edit_win, width=30)
-    entry_mail.insert(0, mail)
-    entry_mail.grid(row=1, column=1)
-
-    tk.Label(edit_win, text="Пароль:").grid(row=2, column=0, padx=10, pady=5)
-    entry_pass = tk.Entry(edit_win, show="*", width=30)
-    entry_pass.insert(0, password)
-    entry_pass.grid(row=2, column=1)
-
-    selected_org = tk.StringVar()
-    org_options = [f"{org['id']} - {org['name']}" for org in orgs]
-    combo_box = ttk.Combobox(edit_win, textvariable=selected_org, values=org_options, state="readonly", width=27)
-    combo_box.current(org_index)
-    combo_box.grid(row=3, column=1, padx=10, pady=5)
-
-    def save_changes():
-        updated_full_name = entry_fio.get().strip()
-        updated_mail = entry_mail.get().strip()
-        updated_password = entry_pass.get().strip()
-        updated_org_id = combo_box.get().split(" - ")[0]
-
-        if not updated_full_name:
-            messagebox.showwarning("Ошибка", "Ф.И.О. не может быть пустым!")
-            return
-
-        db = connect_db()
-        cursor = db.cursor()
-        sql = """
-            UPDATE employees 
-            SET full_name = %s, mail = %s, pass = %s, organization_id = %s 
-            WHERE id = %s
-        """
-        cursor.execute(sql, (updated_full_name, updated_mail, updated_password, int(updated_org_id), employee_id))
-        db.commit()
-        db.close()
-
-        messagebox.showinfo("Успех", "Данные сотрудника обновлены!")
-        refresh_employee_table(tree)
-        edit_win.destroy()
-
-    tk.Button(edit_win, text="Сохранить изменения", command=save_changes).grid(row=4, column=0, columnspan=2, pady=10)
-
-
-# Удаление сотрудника
-def delete_employee(tree):
-    selected_item = tree.selection()
-    if not selected_item:
-        messagebox.showwarning("Ошибка", "Выберите сотрудника для удаления!")
-        return
-
-    item_data = tree.item(selected_item)
-    employee_id = item_data['values'][0]
-
-    confirm = messagebox.askyesno("Подтверждение", f"Вы действительно хотите удалить сотрудника ID={employee_id}?")
-    if not confirm:
-        return
-
+# Получение списка таблиц из базы
+def get_tables():
     db = connect_db()
     cursor = db.cursor()
-    cursor.execute("DELETE FROM employees WHERE id = %s", (employee_id,))
-    db.commit()
+    cursor.execute("SHOW TABLES")
+    tables = [table[0] for table in cursor.fetchall()]
     db.close()
-
-    messagebox.showinfo("Успех", "Сотрудник удален!")
-    refresh_employee_table(tree)
+    return tables
 
 
-# === ФУНКЦИИ ДЛЯ ОРГАНИЗАЦИЙ ===
-
-# Окно просмотра организаций
-def show_organizations_window():
-    win = tk.Toplevel()
-    win.title("Организации")
-
-    tk.Label(win, text="Список организаций:").pack(pady=5)
-
-    listbox = tk.Listbox(win, width=50, height=10)
-    listbox.pack(padx=10, pady=5)
-
-    refresh_organization_list(listbox)
-
-    tk.Label(win, text="Добавить новую организацию:").pack(pady=5)
-    new_org_entry = tk.Entry(win, width=30)
-    new_org_entry.pack(padx=10, pady=5)
-
-    def add_and_refresh():
-        name = new_org_entry.get().strip()
-        if not name:
-            messagebox.showwarning("Ошибка", "Название организации не может быть пустым!")
-            return
-
-        db = connect_db()
-        cursor = db.cursor()
-        cursor.execute("INSERT INTO branch (name) VALUES (%s)", (name,))
-        db.commit()
-        db.close()
-
-        new_org_entry.delete(0, tk.END)
-        refresh_organization_list(listbox)
-
-    tk.Button(win, text="Добавить организацию", command=add_and_refresh).pack(pady=5)
-
-    btn_frame = tk.Frame(win)
-    btn_frame.pack(pady=10)
-
-    tk.Button(btn_frame, text="Обновить", command=lambda: refresh_organization_list(listbox)).pack(side=tk.LEFT, padx=5)
-    tk.Button(btn_frame, text="Редактировать", command=lambda: edit_organization(listbox)).pack(side=tk.LEFT, padx=5)
-    tk.Button(btn_frame, text="Удалить", command=lambda: delete_organization(listbox)).pack(side=tk.LEFT, padx=5)
-
-
-# Обновление списка организаций
-def refresh_organization_list(listbox):
-    listbox.delete(0, tk.END)
-    orgs = load_organizations()
-    for org in orgs:
-        listbox.insert(tk.END, f"{org['id']} - {org['name']}")
-
-
-# Загрузка организаций
-def load_organizations():
+# Получение структуры таблицы
+def get_table_columns(table_name):
     db = connect_db()
     cursor = db.cursor(dictionary=True)
-    cursor.execute("SELECT id, name FROM branch")
-    organizations = cursor.fetchall()
+    cursor.execute(f"DESCRIBE {table_name}")
+    columns = [col['Field'] for col in cursor.fetchall()]
     db.close()
-    return organizations
+    return columns
 
 
-# Редактирование организации
-def edit_organization(listbox):
-    selected = listbox.curselection()
-    if not selected:
-        messagebox.showwarning("Ошибка", "Выберите организацию для редактирования!")
-        return
+# Окно создания таблицы
+def create_custom_table_window():
+    win = tk.Toplevel()
+    win.title("Создать новую таблицу")
 
-    org_info = listbox.get(selected[0])
-    org_id, name = org_info.split(" - ", 1)
+    tk.Label(win, text="Имя новой таблицы:").pack(pady=5)
+    entry_table_name = tk.Entry(win, width=30)
+    entry_table_name.pack(padx=10, pady=5)
 
-    edit_win = tk.Toplevel()
-    edit_win.title("Редактировать организацию")
+    fields_frame = tk.Frame(win)
+    fields_frame.pack(padx=10, pady=10)
 
-    tk.Label(edit_win, text="Название организации:").pack(pady=5)
-    entry_name = tk.Entry(edit_win, width=30)
-    entry_name.insert(0, name)
-    entry_name.pack(padx=10, pady=5)
+    field_rows = []
 
-    def save_changes():
-        new_name = entry_name.get().strip()
-        if not new_name:
-            messagebox.showwarning("Ошибка", "Название не может быть пустым!")
+    types = ['INT', 'VARCHAR(255)', 'TEXT', 'DATE', 'DATETIME', 'BOOLEAN']
+    constraints = ['NOT NULL', 'UNIQUE', 'DEFAULT']
+
+    def add_field_row():
+        row = {}
+
+        frame = tk.Frame(fields_frame)
+        frame.pack(anchor='w', pady=5)
+
+        # Имя столбца
+        tk.Label(frame, text="Имя поля:").pack(side=tk.LEFT)
+        entry_name = tk.Entry(frame, width=10)
+        entry_name.pack(side=tk.LEFT, padx=5)
+
+        # Тип данных
+        tk.Label(frame, text="Тип:").pack(side=tk.LEFT)
+        type_var = tk.StringVar()
+        combo_type = ttk.Combobox(frame, textvariable=type_var, values=types, state="readonly", width=10)
+        combo_type.set('VARCHAR(255)')
+        combo_type.pack(side=tk.LEFT, padx=5)
+
+        # NOT NULL
+        not_null_var = tk.BooleanVar()
+        tk.Checkbutton(frame, text="NOT NULL", variable=not_null_var).pack(side=tk.LEFT, padx=5)
+
+        # UNIQUE
+        unique_var = tk.BooleanVar()
+        tk.Checkbutton(frame, text="UNIQUE", variable=unique_var).pack(side=tk.LEFT, padx=5)
+
+        # DEFAULT
+        default_var = tk.StringVar()
+        entry_default = tk.Entry(frame, textvariable=default_var, width=8)
+        entry_default.insert(0, "DEFAULT")
+        entry_default.pack(side=tk.LEFT, padx=5)
+
+        row['frame'] = frame
+        row['entry_name'] = entry_name
+        row['combo_type'] = combo_type
+        row['not_null_var'] = not_null_var
+        row['unique_var'] = unique_var
+        row['default_var'] = default_var
+
+        field_rows.append(row)
+
+    def create_table():
+        table_name = entry_table_name.get().strip()
+        if not table_name:
+            messagebox.showwarning("Ошибка", "Имя таблицы не может быть пустым!")
             return
 
-        db = connect_db()
-        cursor = db.cursor()
-        cursor.execute("UPDATE branch SET name = %s WHERE id = %s", (new_name, int(org_id)))
-        db.commit()
-        db.close()
+        fields = []
+        primary_key = selected_primary_key.get()
 
-        messagebox.showinfo("Успех", "Название организации изменено!")
-        refresh_organization_list(listbox)
-        edit_win.destroy()
+        for idx, row in enumerate(field_rows):
+            name = row['entry_name'].get().strip()
+            data_type = row['combo_type'].get()
+            not_null = row['not_null_var'].get()
+            unique = row['unique_var'].get()
+            default_value = row['default_var'].get().strip()
 
-    tk.Button(edit_win, text="Сохранить", command=save_changes).pack(pady=10)
+            if not name:
+                continue  # Пропускаем пустые строки
 
+            field_sql = f"`{name}` {data_type}"
 
-# Удаление организации
-def delete_organization(listbox):
-    selected = listbox.curselection()
-    if not selected:
-        messagebox.showwarning("Ошибка", "Выберите организацию для удаления!")
-        return
+            if not_null:
+                field_sql += " NOT NULL"
 
-    org_info = listbox.get(selected[0])
-    org_id = org_info.split(" - ", 1)[0]
+            if unique:
+                field_sql += " UNIQUE"
 
-    confirm = messagebox.askyesno("Подтверждение", f"Удалить организацию ID={org_id}?")
-    if not confirm:
-        return
+            if default_value and default_value != "DEFAULT":
+                if data_type.startswith("VARCHAR") or data_type == "TEXT":
+                    field_sql += f" DEFAULT '{default_value}'"
+                else:
+                    field_sql += f" DEFAULT {default_value}"
 
-    db = connect_db()
-    cursor = db.cursor()
-    cursor.execute("DELETE FROM branch WHERE id = %s", (int(org_id),))
-    db.commit()
-    db.close()
+            fields.append(field_sql)
 
-    messagebox.showinfo("Успех", "Организация удалена!")
-    refresh_organization_list(listbox)
+        if not fields:
+            messagebox.showwarning("Ошибка", "Добавьте хотя бы одно поле!")
+            return
+
+        # Добавляем первичный ключ
+        if primary_key:
+            fields.append(f"PRIMARY KEY ({primary_key})")
+
+        # Собираем запрос
+        query = f"CREATE TABLE IF NOT EXISTS `{table_name}` ({', '.join(fields)}) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
+
+        try:
+            db = connect_db()
+            cursor = db.cursor()
+            cursor.execute(query)
+            db.commit()
+            db.close()
+            messagebox.showinfo("Успех", f"Таблица '{table_name}' создана!")
+            win.destroy()
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Ошибка при создании таблицы:\n{e}")
+
+    def add_foreign_key():
+        fk_win = tk.Toplevel()
+        fk_win.title("Добавить внешний ключ")
+
+        tk.Label(fk_win, text="Название внешнего ключа:").pack(pady=5)
+        entry_fk_name = tk.Entry(fk_win, width=30)
+        entry_fk_name.pack(padx=10, pady=5)
+
+        tk.Label(fk_win, text="Столбец текущей таблицы:").pack(pady=5)
+        entry_column = tk.Entry(fk_win, width=30)
+        entry_column.pack(padx=10, pady=5)
+
+        tables = get_tables()
+        tk.Label(fk_win, text="Таблица-ссылка:").pack(pady=5)
+        fk_table_var = tk.StringVar()
+        fk_table_combo = ttk.Combobox(fk_win, textvariable=fk_table_var, values=tables, state="readonly")
+        fk_table_combo.pack(padx=10, pady=5)
+
+        def set_reference_column(event=None):
+            table = fk_table_combo.get()
+            if table:
+                columns = get_table_columns(table)
+                fk_col_combo['values'] = columns
+                if columns:
+                    fk_col_combo.current(0)
+
+        tk.Label(fk_win, text="Поле ссылки:").pack(pady=5)
+        fk_col_var = tk.StringVar()
+        fk_col_combo = ttk.Combobox(fk_win, textvariable=fk_col_var, state="readonly")
+        fk_col_combo.pack(padx=10, pady=5)
+
+        fk_table_combo.bind("<<ComboboxSelected>>", lambda e: set_reference_column())
+
+        def save_foreign_key():
+            fk_name = entry_fk_name.get().strip()
+            column = entry_column.get().strip()
+            ref_table = fk_table_combo.get().strip()
+            ref_column = fk_col_combo.get().strip()
+
+            if not all([fk_name, column, ref_table, ref_column]):
+                messagebox.showwarning("Ошибка", "Заполните все поля внешнего ключа!")
+                return
+
+            try:
+                db = connect_db()
+                cursor = db.cursor()
+                cursor.execute(f"ALTER TABLE `{table_name}` ADD CONSTRAINT `{fk_name}` FOREIGN KEY (`{column}`) REFERENCES `{ref_table}`(``{ref_column}`);")
+                db.commit()
+                db.close()
+                messagebox.showinfo("Успех", f"Внешний ключ `{fk_name}` добавлен!")
+                fk_win.destroy()
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось добавить внешний ключ:\n{e}")
+
+        tk.Button(fk_win, text="Добавить внешний ключ", command=save_foreign_key).pack(pady=10)
+
+    # Форма для добавления полей
+    tk.Label(win, text="Добавьте поля таблицы:", font=("Arial", 10, "bold")).pack(pady=5)
+
+    field_controls = tk.Frame(win)
+    field_controls.pack()
+
+    add_button = tk.Button(field_controls, text="Добавить поле", command=add_field_row)
+    add_button.pack(side=tk.LEFT, padx=5)
+
+    # Выбор первичного ключа
+    tk.Label(win, text="Первичный ключ (оставь пустым, чтобы использовать id):").pack(pady=5)
+    selected_primary_key = tk.StringVar()
+    entry_pk = tk.Entry(win, textvariable=selected_primary_key, width=30)
+    entry_pk.pack(padx=10, pady=5)
+
+    # Кнопка создания таблицы
+    tk.Button(win, text="Создать таблицу", command=create_table).pack(pady=10)
+
+    # Кнопка добавления внешнего ключа
+    tk.Button(win, text="Добавить внешний ключ", command=add_foreign_key).pack(pady=5)
+
+    # По умолчанию одно поле
+    add_field_row()
 
 
 # === ГЛАВНОЕ МЕНЮ ===
 def create_main_menu():
     root = tk.Tk()
     root.title("Главная")
-    root.geometry("300x150")
+    root.geometry("300x200")
     root.resizable(False, False)
 
     tk.Label(root, text="Выберите действие:", font=("Arial", 14)).pack(pady=20)
 
-    tk.Button(root, text="Посмотреть сотрудников", width=25, command=show_employees_window).pack(pady=5)
-    tk.Button(root, text="Посмотреть организации", width=25, command=show_organizations_window).pack(pady=5)
+    tk.Button(root, text="Создать новую таблицу", width=25, command=create_custom_table_window).pack(pady=5)
 
     root.mainloop()
 
