@@ -16,6 +16,6 @@
 
 ## ▶️ Как запустить?
 
-1. Клонируйте репозиторий:
+1. Запустить приложение:
    ```bash
-   git clone https://github.com/ ваш_логин/employee-manager.git
+   MyApp.exe
