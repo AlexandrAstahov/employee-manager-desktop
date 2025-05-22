@@ -43,59 +43,79 @@ def connect_db():
     )
 
 
+# === СЛУЖЕБНАЯ ТАБЛИЦА metadata ===
+
+# Проверка наличия служебной таблицы
+def check_metadata_table():
+    try:
+        db = connect_db()
+        cursor = db.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS table_metadata (
+                table_name VARCHAR(64) PRIMARY KEY,
+                display_name VARCHAR(255) NOT NULL
+            )
+        """)
+        db.commit()
+        db.close()
+    except Exception as e:
+        db.close()
+        messagebox.showerror("Ошибка подключения", f"Не удалось создать служебную таблицу:\n{e}")
+        exit()
+
+
+# Установка названия таблицы
+def set_table_display_name(table_name, display_name):
+    db = connect_db()
+    cursor = db.cursor()
+    try:
+        cursor.execute("REPLACE INTO table_metadata (table_name, display_name) VALUES (%s, %s)",
+                       (table_name, display_name))
+        db.commit()
+    finally:
+        db.close()
+
+
+# Получение названий таблиц
+def get_tables_with_names():
+    db = connect_db()
+    cursor = db.cursor(dictionary=True)
+    try:
+        cursor.execute("SELECT table_name, display_name FROM table_metadata")
+        result = cursor.fetchall()
+        return {item['table_name']: item['display_name'] for item in result}
+    finally:
+        db.close()
+
+
 # Получение списка таблиц из базы данных
 def get_tables():
     db = connect_db()
     cursor = db.cursor()
-    cursor.execute("SHOW TABLES")
-    tables = [table[0] for table in cursor.fetchall()]
-    db.close()
-    return tables
-
-
-# Получение структуры таблицы
-def get_table_columns(table_name):
-    db = connect_db()
-    cursor = db.cursor()
     try:
-        cursor.execute(f"DESCRIBE {table_name}")
-        columns = [col[0] for col in cursor.fetchall()]
+        cursor.execute("SHOW TABLES")
+        tables = [table[0] for table in cursor.fetchall()]
+        return tables
+    finally:
         db.close()
-        return columns
-    except Exception as e:
-        db.close()
-        return None
 
 
-# Загрузка записей из таблицы
-def load_table_data(tree, table_name):
-    for item in tree.get_children():
-        tree.delete(item)
-
-    db = connect_db()
-    cursor = db.cursor(dictionary=True)
-    try:
-        cursor.execute(f"SELECT * FROM {table_name}")
-        rows = cursor.fetchall()
-        for row in rows:
-            values = [row[col] for col in row]
-            tree.insert("", tk.END, values=values)
-        db.close()
-    except Exception as e:
-        db.close()
-        messagebox.showerror("Ошибка", f"Не удалось загрузить данные:\n{e}")
-
-
-# === СОЗДАНИЕ ТАБЛИЦЫ ===
+# === СОЗДАНИЕ ТАБЛИЦЫ + НАЗВАНИЕ ===
 
 # Окно создания таблицы
 def create_custom_table_window():
     win = tk.Toplevel()
     win.title("Создать новую таблицу")
 
-    tk.Label(win, text="Имя новой таблицы:").pack(pady=5)
+    # Поле имени таблицы
+    tk.Label(win, text="Имя таблицы (латиницей):").pack(pady=5)
     entry_table_name = tk.Entry(win, width=30)
     entry_table_name.pack(padx=10, pady=5)
+
+    # Поле отображаемого названия
+    tk.Label(win, text="Название таблицы (на русском):").pack(pady=5)
+    entry_display_name = tk.Entry(win, width=30)
+    entry_display_name.pack(padx=10, pady=5)
 
     fields_frame = tk.Frame(win)
     fields_frame.pack(padx=10, pady=10)
@@ -103,7 +123,6 @@ def create_custom_table_window():
     field_rows = []
 
     types = ['INT', 'VARCHAR(255)', 'TEXT', 'DATE', 'DATETIME', 'BOOLEAN']
-    constraints = ['NOT NULL', 'UNIQUE', 'DEFAULT']
 
     def add_field_row():
         row = {}
@@ -143,9 +162,13 @@ def create_custom_table_window():
 
     def create_table():
         table_name = entry_table_name.get().strip()
+        display_name = entry_display_name.get().strip()
+
         if not table_name:
             messagebox.showwarning("Ошибка", "Имя таблицы не может быть пустым!")
             return
+        if not display_name:
+            display_name = table_name  # Если не указано, ставим имя как название
 
         fields = []
         for row in field_rows:
@@ -187,7 +210,9 @@ def create_custom_table_window():
             cursor = db.cursor()
             cursor.execute(query)
             db.commit()
+            set_table_display_name(table_name, display_name)
             db.close()
+
             messagebox.showinfo("Успех", f"Таблица '{table_name}' создана!")
             win.destroy()
         except Exception as e:
@@ -203,11 +228,17 @@ def create_custom_table_window():
     add_field_row()
 
 
-# === ПОКАЗ ВСЕХ ТАБЛИЦ И РАБОТА С НИМИ ===
+# === ПОКАЗ ВСЕХ ТАБЛИЦ С НАЗВАНИЯМИ ===
 
 # Окно: список таблиц
 def show_all_tables_window():
-    tables = get_tables()
+    try:
+        tables = get_tables()
+        display_names = get_tables_with_names()
+    except Exception as e:
+        messagebox.showerror("Ошибка подключения", f"Не удалось загрузить таблицы:\n{e}")
+        return
+
     if not tables:
         messagebox.showinfo("Нет таблиц", "В базе пока нет таблиц")
         return
@@ -215,41 +246,44 @@ def show_all_tables_window():
     win = tk.Toplevel()
     win.title("Все таблицы")
 
-    tk.Label(win, text="Список таблиц:", font=("Arial", 12)).pack(pady=5)
-
-    listbox = tk.Listbox(win, width=40, height=15)
-    listbox.pack(padx=10, pady=5)
+    # Таблица с данными
+    tree = ttk.Treeview(win, columns=("Имя таблицы", "Название"), show="headings")
+    tree.heading("Имя таблицы", text="Имя таблицы")
+    tree.heading("Название", text="Название")
+    tree.column("Имя таблицы", width=150)
+    tree.column("Название", width=150)
+    tree.pack(padx=10, pady=10)
 
     for table in tables:
-        listbox.insert(tk.END, table)
+        tree.insert("", tk.END, values=(table, display_names.get(table, table)))
 
     btn_frame = tk.Frame(win)
     btn_frame.pack(pady=10)
 
-    tk.Button(btn_frame, text="Открыть таблицу", command=lambda: open_selected_table(listbox)).pack(side=tk.LEFT, padx=5)
-    tk.Button(btn_frame, text="Удалить таблицу", command=lambda: delete_selected_table(listbox, win)).pack(side=tk.LEFT, padx=5)
+    tk.Button(btn_frame, text="Открыть таблицу", command=lambda: open_selected_table(tree)).pack(side=tk.LEFT, padx=5)
+    tk.Button(btn_frame, text="Удалить таблицу", command=lambda: delete_selected_table(tree, win)).pack(side=tk.LEFT, padx=5)
     tk.Button(btn_frame, text="Обновить", command=lambda: [win.destroy(), show_all_tables_window()]).pack(side=tk.LEFT, padx=5)
 
 
 # Открытие выбранной таблицы
-def open_selected_table(listbox):
-    selected = listbox.curselection()
+def open_selected_table(tree):
+    selected = tree.selection()
     if not selected:
         messagebox.showwarning("Ошибка", "Выберите таблицу")
         return
 
-    table_name = listbox.get(selected)
+    table_name = tree.item(selected)['values'][0]
     open_table_window(table_name)
 
 
 # Удаление выбранной таблицы
-def delete_selected_table(listbox, window):
-    selected = listbox.curselection()
+def delete_selected_table(tree, window):
+    selected = tree.selection()
     if not selected:
         messagebox.showwarning("Ошибка", "Выберите таблицу для удаления")
         return
 
-    table_name = listbox.get(selected[0])
+    table_name = tree.item(selected)['values'][0]
 
     confirm = messagebox.askyesno("Подтверждение", f"Вы действительно хотите удалить таблицу '{table_name}'?")
     if not confirm:
@@ -259,16 +293,19 @@ def delete_selected_table(listbox, window):
         db = connect_db()
         cursor = db.cursor()
         cursor.execute(f"DROP TABLE IF EXISTS `{table_name}`")
+        cursor.execute(f"DELETE FROM table_metadata WHERE table_name = '{table_name}'")
         db.commit()
         db.close()
-        messagebox.showinfo("Успех", f"Таблица '{table_name}' удалена!")
+        messagebox.showinfo("Успех", f"Таблица '{table_name}' удалена из БД и метаданных")
         window.destroy()
         show_all_tables_window()
     except Exception as e:
         messagebox.showerror("Ошибка", f"Не удалось удалить таблицу:\n{e}")
 
 
-# Окно: работа с конкретной таблицей
+# === РАБОТА С КОНКРЕТНОЙ ТАБЛИЦЕЙ ===
+
+# Окно просмотра данных таблицы
 def open_table_window(table_name):
     win = tk.Toplevel()
     win.title(f"Таблица: {table_name}")
@@ -298,6 +335,38 @@ def open_table_window(table_name):
     tk.Button(btn_frame, text="Редактировать", command=lambda: edit_record_window(table_name, tree, lambda: load_table_data(tree, table_name))).pack(side=tk.LEFT, padx=5)
     tk.Button(btn_frame, text="Удалить", command=lambda: delete_record_window(table_name, tree, lambda: load_table_data(tree, table_name))).pack(side=tk.LEFT, padx=5)
 
+
+# Загрузка записей из таблицы
+def load_table_data(tree, table_name):
+    for item in tree.get_children():
+        tree.delete(item)
+
+    try:
+        db = connect_db()
+        cursor = db.cursor(dictionary=True)
+        cursor.execute(f"SELECT * FROM {table_name}")
+        rows = cursor.fetchall()
+        for row in rows:
+            tree.insert("", tk.END, values=[row[col] for col in row])
+        db.close()
+    except Exception as e:
+        messagebox.showerror("Ошибка", f"Не удалось загрузить данные:\n{e}")
+
+
+# Получение структуры таблицы
+def get_table_columns(table_name):
+    try:
+        db = connect_db()
+        cursor = db.cursor()
+        cursor.execute(f"DESCRIBE {table_name}")
+        columns = [col[0] for col in cursor.fetchall()]
+        db.close()
+        return columns
+    except Exception as e:
+        return None
+
+
+# === ДОБАВЛЕНИЕ/РЕДАКТИРОВАНИЕ/УДАЛЕНИЕ ЗАПИСЕЙ ===
 
 # Добавление записи
 def add_record_window(table_name, refresh_callback):
@@ -361,6 +430,7 @@ def edit_record_window(table_name, tree, refresh_callback):
 
     item = tree.item(selected)
     values = item['values']
+    record_id = values[0]
 
     win = tk.Toplevel()
     win.title(f"Редактировать запись в {table_name}")
@@ -380,7 +450,6 @@ def edit_record_window(table_name, tree, refresh_callback):
 
     def save_changes():
         updates = []
-        where_id = entries['id'].get() if 'id' in entries else ''
         for field, entry in entries.items():
             val = entry.get().strip()
             if field == 'id':
@@ -390,11 +459,11 @@ def edit_record_window(table_name, tree, refresh_callback):
             else:
                 updates.append(f"{field} = '{val}'")
 
-        if not where_id:
-            messagebox.showerror("Ошибка", "ID не указан")
+        if not updates:
+            messagebox.showwarning("Ошибка", "Ничего не изменено")
             return
 
-        sql = f"UPDATE `{table_name}` SET {', '.join(updates)} WHERE id = {where_id}"
+        sql = f"UPDATE `{table_name}` SET {', '.join(updates)} WHERE id = {record_id}"
 
         try:
             db = connect_db()
@@ -407,8 +476,6 @@ def edit_record_window(table_name, tree, refresh_callback):
             refresh_callback()
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось сохранить изменения:\n{e}")
-
-    tk.Button(win, text="Сохранить изменения", command=save_changes).pack(pady=10)
 
 
 # Удаление записи
@@ -457,4 +524,5 @@ def create_main_menu():
 if __name__ == "__main__":
     ask_password()
     if db_password:
+        check_metadata_table()
         create_main_menu()
