@@ -876,29 +876,60 @@ def add_column_window(table_name, refresh_callback):
 
     # Чекбоксы
     not_null_var = tk.BooleanVar()
-    tk.Checkbutton(win, text="NOT NULL", variable=not_null_var).pack(pady=5)
+    not_null_cb = tk.Checkbutton(win, text="NOT NULL", variable=not_null_var)
+    not_null_cb.pack(pady=5)
 
     unique_var = tk.BooleanVar()
-    tk.Checkbutton(win, text="UNIQUE", variable=unique_var).pack(pady=5)
+    unique_cb = tk.Checkbutton(win, text="UNIQUE", variable=unique_var)
+    unique_cb.pack(pady=5)
 
     # Значение по умолчанию
     tk.Label(win, text="Значение по умолчанию:").pack(pady=5)
     default_entry = tk.Entry(win, width=30)
     default_entry.pack(pady=5)
 
+    btn_save = tk.Button(win, text="Сохранить")
+    btn_save.pack(pady=10)
+
+    # Динамическая подсказка
+    def update_tooltip(*args):
+        name = name_entry.get().strip() or 'имя'
+        data_type = type_var.get() or 'тип'
+        not_null = ' NOT NULL' if not_null_var.get() else ''
+        unique = ' UNIQUE' if unique_var.get() else ''
+        default = default_entry.get().strip()
+        if default:
+            if data_type.startswith('VARCHAR') or data_type == 'TEXT':
+                default_clause = f" DEFAULT '{default}'"
+            elif data_type == 'BOOLEAN':
+                default_clause = f" DEFAULT {default.upper()}"
+            else:
+                default_clause = f" DEFAULT {default}"
+        else:
+            default_clause = ''
+        sql = f"ALTER TABLE `{table_name}` ADD COLUMN `{name}` {data_type}{not_null}{unique}{default_clause}"
+        btn_save.tooltip = SQLTooltip(btn_save, sql)
+
+    # Привязка обновления подсказки к каждому полю
+    name_entry.bind('<KeyRelease>', update_tooltip)
+    type_var.trace('w', update_tooltip)
+    not_null_var.trace('w', update_tooltip)
+    unique_var.trace('w', update_tooltip)
+    default_entry.bind('<KeyRelease>', update_tooltip)
+
+    # Первичная инициализация подсказки
+    update_tooltip()
+
     def save_column():
         name = name_entry.get().strip()
         if not name:
             messagebox.showwarning("Ошибка", "Введите имя колонки")
             return
-
         data_type = type_var.get()
         not_null = "NOT NULL" if not_null_var.get() else ""
         unique = "UNIQUE" if unique_var.get() else ""
         default = default_entry.get().strip()
         default_clause = f"DEFAULT '{default}'" if default else ""
-
-        # Формируем SQL запрос
         sql_parts = [f"`{name}` {data_type}"]
         if not_null:
             sql_parts.append(not_null)
@@ -906,7 +937,6 @@ def add_column_window(table_name, refresh_callback):
             sql_parts.append(unique)
         if default_clause:
             sql_parts.append(default_clause)
-
         try:
             db = connect_db()
             cursor = db.cursor()
@@ -918,8 +948,7 @@ def add_column_window(table_name, refresh_callback):
             refresh_callback()
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось добавить колонку:\n{e}")
-
-    tk.Button(win, text="Сохранить", command=save_column).pack(pady=10)
+    btn_save.config(command=save_column)
 
 def edit_column_window(table_name, column_name, refresh_callback):
     win = tk.Toplevel()
